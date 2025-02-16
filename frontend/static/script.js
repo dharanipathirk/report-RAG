@@ -4,6 +4,7 @@ const promptForm = document.querySelector(".prompt-form");
 const promptInput = promptForm.querySelector(".prompt-input");
 const fileInput = promptForm.querySelector("#file-input");
 const fileUploadWrapper = promptForm.querySelector(".file-upload-wrapper");
+const useReportBtn = document.getElementById("use-report-btn");
 
 
 
@@ -243,6 +244,9 @@ fileInput.addEventListener("change", () => {
       isImage: false,  // Not an image
     };
 
+    useReportBtn.classList.remove("active");
+    useReportBtn.disabled = true;
+
     // OPTIONAL: Immediately call the embedding endpoint
     //           to demonstrate usage.
     try {
@@ -276,6 +280,7 @@ fileInput.addEventListener("change", () => {
 document.querySelector("#cancel-file-btn").addEventListener("click", () => {
   userData.file = {};
   fileUploadWrapper.classList.remove("file-attached", "img-attached", "active");
+  useReportBtn.disabled = false;
 });
 
 // Stop Bot Response
@@ -316,9 +321,6 @@ document.addEventListener("click", ({ target }) => {
 // Add event listeners for form submission and file input click
 promptForm.addEventListener("submit", handleFormSubmit);
 promptForm.querySelector("#add-file-btn").addEventListener("click", () => fileInput.click());
-
-
-const useReportBtn = document.getElementById("use-report-btn");
 
 if (useReportBtn) {
   useReportBtn.addEventListener("click", () => {
