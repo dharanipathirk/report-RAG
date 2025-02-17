@@ -1,4 +1,7 @@
 <!DOCTYPE html>
+<!-- Main HTML file for Report-RAG.
+     Contains the login and chat interfaces along with client-side scripts for authentication and messaging.
+-->
 <html lang="en">
 
 <head>
@@ -12,8 +15,10 @@
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/2.4.0/purify.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.5.0/styles/atom-one-dark.min.css">
-  <!-- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.5.0/styles/vs2015.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.5.0/styles/github.min.css"> -->
+  <!-- Alternative highlight.js themes (commented out)
+       <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.5.0/styles/vs2015.min.css">
+       <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.5.0/styles/github.min.css">
+  -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.5.0/highlight.min.js"></script>
 </head>
 
@@ -40,6 +45,7 @@
             </div>
           </div>
         </div>
+      </div>
     </section>
   </div>
   <div id="login-container" class="login-page" style="display: none;">
@@ -65,6 +71,7 @@
               </div>
             </div>
           </div>
+        </div>
       </section>
       <div class="wrapper">
         <form action="" id="loginForm">
@@ -108,19 +115,19 @@
                 src="https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348af7287ce7c2a304e3a4_Abstract%20Shape%203.webp"
                 loading="eager" sizes="(max-width: 479px) 145.109375px, (max-width: 767px) 241.859375px, 290.234375px"
                 srcset="https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348af7287ce7c2a304e3a4_Abstract%20Shape%203-p-500.webp 500w,
-                                   https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348af7287ce7c2a304e3a4_Abstract%20Shape%203-p-800.webp 800w,
-                                   https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348af7287ce7c2a304e3a4_Abstract%20Shape%203-p-1080.webp 1080w,
-                                   https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348af7287ce7c2a304e3a4_Abstract%20Shape%203-p-1600.webp 1600w,
-                                   https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348af7287ce7c2a304e3a4_Abstract%20Shape%203.webp 2000w"
+                        https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348af7287ce7c2a304e3a4_Abstract%20Shape%203-p-800.webp 800w,
+                        https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348af7287ce7c2a304e3a4_Abstract%20Shape%203-p-1080.webp 1080w,
+                        https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348af7287ce7c2a304e3a4_Abstract%20Shape%203-p-1600.webp 1600w,
+                        https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348af7287ce7c2a304e3a4_Abstract%20Shape%203.webp 2000w"
                 alt="" class="abstract-shape shape-4">
               <img id="image-2"
                 src="https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348a2e912ec5fe0fce931c_Abstract%20Shape%203.webp"
                 loading="eager" sizes="(max-width: 479px) 128px, (max-width: 767px) 192px, 256px"
                 srcset="https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348a2e912ec5fe0fce931c_Abstract%20Shape%203-p-500.webp 500w,
-                                   https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348a2e912ec5fe0fce931c_Abstract%20Shape%203-p-800.webp 800w,
-                                   https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348a2e912ec5fe0fce931c_Abstract%20Shape%203-p-1080.webp 1080w,
-                                   https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348a2e912ec5fe0fce931c_Abstract%20Shape%203-p-1600.webp 1600w,
-                                   https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348a2e912ec5fe0fce931c_Abstract%20Shape%203.webp 2000w" alt="" class="abstract-shape shape-3">
+                        https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348a2e912ec5fe0fce931c_Abstract%20Shape%203-p-800.webp 800w,
+                        https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348a2e912ec5fe0fce931c_Abstract%20Shape%203-p-1080.webp 1080w,
+                        https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348a2e912ec5fe0fce931c_Abstract%20Shape%203-p-1600.webp 1600w,
+                        https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348a2e912ec5fe0fce931c_Abstract%20Shape%203.webp 2000w" alt="" class="abstract-shape shape-3">
               <img id="image-3"
                 src="https://cdn.prod.website-files.com/6605d052b6285185135a565d/66348af7a0774210bafec23e_Abstract%20Shape%202.webp"
                 loading="eager" alt="" class="abstract-shape shape-2">
@@ -182,7 +189,10 @@
   </div>
   <script src="/config.js"></script>
   <script>
-    // Initial check for authentication
+    /**
+     * Checks user authentication status by sending a GET request to the token validation endpoint.
+     * If authenticated, displays the chat interface; otherwise, shows the login form.
+     */
     async function checkAuth() {
       try {
         const response = await fetch('/api/validate-token', {
@@ -203,12 +213,18 @@
       }
     }
 
+    /**
+     * Displays the login form and hides the chat interface.
+     */
     function showLogin() {
       document.getElementById('login-container').style.display = 'flex';
       document.getElementById('chat-container').style.display = 'none';
     }
 
-    // Login form handler
+    /**
+     * Handles login form submission by sending credentials to the login API.
+     * On success, rechecks authentication; on failure, alerts the user.
+     */
     document.getElementById("loginForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const formData = new FormData(e.target);
@@ -235,7 +251,7 @@
       }
     });
 
-    // Initial auth check
+    // Initial authentication check on page load.
     checkAuth();
   </script>
   <script src="/static/script.js"></script>

@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 frontend_router = APIRouter()
 api_router = APIRouter()
 
-# Set the OpenAI API key from environment
+# Set OpenAI API key from environment variable.
 openai.api_key = os.getenv('OPENAI_API_KEY')
 env = os.getenv('ENV', 'development')
 
@@ -44,6 +44,9 @@ process_reports(report_model)
 
 @frontend_router.get('/config.js')
 async def get_config():
+    """
+    Returns a JavaScript configuration file with API base URL and environment settings.
+    """
     env = os.environ.get('ENV', 'development')
     config = {'API_BASE': 'http://localhost:8000' if env == 'development' else ''}
     js_content = f"""
@@ -57,11 +60,17 @@ async def get_config():
 
 @frontend_router.get('/')
 async def read_index():
+    """
+    Serves the main index.html file for the frontend.
+    """
     return FileResponse('../frontend/static/index.html')
 
 
 @api_router.post('/login')
 def login(response: Response, username: str = Form(...), password: str = Form(...)):
+    """
+    Authenticates a user and sets a secure cookie with an access token.
+    """
     user = auth.FAKE_USER_DB.get(username)
     if not user or not auth.verify_password(password, user['hashed_password']):
         raise HTTPException(status_code=400, detail='Incorrect username or password')
@@ -84,6 +93,9 @@ def login(response: Response, username: str = Form(...), password: str = Form(..
 
 @api_router.get('/validate-token')
 def validate_token(request: Request):
+    """
+    Validates the user's access token from cookies.
+    """
     try:
         auth.get_current_user_from_cookie(request)
         return {'valid': True}
@@ -96,11 +108,11 @@ async def chat(
     request: Request, user: str = Depends(auth.get_current_user_from_cookie)
 ):
     """
-    Receives a JSON payload {"prompt": "..."} and streams a GPT response.
+    Receives a JSON payload with chat messages and streams a GPT response.
+    Expected payload format: {"messages": [...]}
     """
     data = await request.json()
     messages = data.get('messages', [])
-
     if not messages:
         raise HTTPException(status_code=400, detail='No messages provided.')
 
@@ -125,7 +137,7 @@ async def upload_pdf(
     file: UploadFile = File(...), user: str = Depends(auth.get_current_user_from_cookie)
 ):
     """
-    Processes an uploaded PDF and computes embeddings.
+    Processes an uploaded PDF file and computes embeddings using the custom PDF model.
     """
     result = await rag_service.process_pdf_upload(file, custom_pdf_model)
     return result
@@ -136,7 +148,7 @@ async def custom_pdf_query_endpoint(
     request: Request, user: str = Depends(auth.get_current_user_from_cookie)
 ):
     """
-    Retrieves relevant PDF chunks and returns an answer using GPT.
+    Retrieves relevant PDF chunks using the custom PDF model and returns an answer.
     """
     result = await rag_service.query_rag(request, custom_pdf_model)
     return result
@@ -147,7 +159,7 @@ async def report_query_endpoint(
     request: Request, user: str = Depends(auth.get_current_user_from_cookie)
 ):
     """
-    RAG for user report.
+    Processes a report query using the report model via RAG.
     """
     result = await rag_service.query_rag(request, report_model)
     return result

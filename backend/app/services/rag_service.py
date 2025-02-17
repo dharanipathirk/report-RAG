@@ -5,13 +5,16 @@ from fastapi import HTTPException, Request
 
 
 async def process_pdf_upload(file, custom_pdf_model):
+    """
+    Processes an uploaded PDF file by saving it locally, indexing it using the custom PDF model,
+    and computing embeddings.
+    """
     if file.content_type != 'application/pdf':
         raise HTTPException(status_code=400, detail='Only PDF files are allowed.')
 
     uploaded_path = (
         Path(__file__).resolve().parent.parent.parent.parent / 'data' / 'uploaded'
     )
-
     uploaded_path.mkdir(parents=True, exist_ok=True)
     file_path = uploaded_path / file.filename
 
@@ -31,6 +34,9 @@ async def process_pdf_upload(file, custom_pdf_model):
 
 
 def process_reports(report_model):
+    """
+    Indexes reports from the raw data directory using the provided report model.
+    """
     report_path = Path(__file__).resolve().parent.parent.parent.parent / 'data' / 'raw'
     report_model.index(
         input_path=report_path,
@@ -41,15 +47,19 @@ def process_reports(report_model):
 
 
 async def query_rag(request: Request, colpali_model):
+    """
+    Performs a Retrieval-Augmented Generation (RAG) query using the conversation history and the specified model.
+    Summarizes previous conversation context if available, searches for relevant document chunks,
+    and returns the answer along with document and page details.
+    """
     data = await request.json()
     messages = data.get('messages', [])
 
-    # If there is conversation history, summarize all messages except the last one.
+    # Summarize previous conversation context if applicable.
     if len(messages) > 1:
-        # Concatenate the content of all previous messages.
         history_text = '\n'.join(msg.get('content', '') for msg in messages[:-1])
         summarization_prompt = (
-            'Please summarize the following conversation context briefly. This will sent to the RAG model for context.\n'
+            'Please summarize the following conversation context briefly. This will be sent to the RAG model for context.\n'
             'Note: This summarization is solely to maintain context in the query without affecting the RAG process. '
             'Provide only the essential context information.\n\n'
             f'Conversation Context:\n{history_text}'
@@ -67,19 +77,12 @@ async def query_rag(request: Request, colpali_model):
     else:
         summary = ''
 
-    # Get the current (last) message.
+    # Prepare the final query by combining the summary with the current message.
     current_query = messages[-1].get('content', '')
-
-    # Combine the summary with the current query.
-    if summary:
-        query = summary + '\n' + current_query
-    else:
-        query = current_query
-
+    query = summary + '\n' + current_query if summary else current_query
     print(query)
 
     results = colpali_model.search(query, k=3)
-
     result_images = [result['base64'] for result in results]
 
     system_prompt = "You are an assistant that answers questions based on the provided image context. Answer the user's question as accurately as possible using the context below."

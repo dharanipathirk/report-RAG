@@ -1,3 +1,7 @@
+/**
+ * This script manages the chat UI, file uploads, and communication with backend API endpoints.
+ */
+
 const container = document.querySelector(".container");
 const chatsContainer = document.querySelector(".chats-container");
 const promptForm = document.querySelector(".prompt-form");
@@ -6,25 +10,26 @@ const fileInput = promptForm.querySelector("#file-input");
 const fileUploadWrapper = promptForm.querySelector(".file-upload-wrapper");
 const useReportBtn = document.getElementById("use-report-btn");
 
-
-
 const CHAT_API_URL = `${window.APP_CONFIG.API_BASE}/api/chat`;
 const EMBED_API_URL = `${window.APP_CONFIG.API_BASE}/api/upload-pdf`;
 const CUSTOM_PDF_QUERY_API_URL = `${window.APP_CONFIG.API_BASE}/api/custom-pdf-query`;
 const REPORT_QUERY_API_URL = `${window.APP_CONFIG.API_BASE}/api/report-query`;
 
-
 let controller, typingInterval;
 const chatHistory = [];
 const userData = { message: "", file: {} };
-
 let chatStarted = false;
 
+/**
+ * Performs a fetch request with credentials and reloads the page if unauthorized.
+ * @param {string} url - The URL to fetch.
+ * @param {object} [options={}] - Fetch options.
+ * @returns {Promise<Response>} The fetch response.
+ * @throws Will throw an error if the response status is 401.
+ */
 async function authorizedFetch(url, options = {}) {
   options.credentials = 'include';
-
   const response = await fetch(url, options);
-
   if (response.status === 401) {
     window.location.reload();
     throw new Error("Unauthorized");
@@ -32,7 +37,12 @@ async function authorizedFetch(url, options = {}) {
   return response;
 }
 
-// Function to create message elements
+/**
+ * Creates a new message element with specified content and CSS classes.
+ * @param {string} content - The inner HTML content of the message.
+ * @param {...string} classes - Additional CSS classes.
+ * @returns {HTMLElement} The created message element.
+ */
 const createMessageElement = (content, ...classes) => {
   const div = document.createElement("div");
   div.classList.add("message", ...classes);
@@ -40,11 +50,19 @@ const createMessageElement = (content, ...classes) => {
   return div;
 };
 
-// Scroll to the bottom of the container
+/**
+ * Scrolls the main container to the bottom smoothly.
+ */
 const scrollToBottom = () =>
   container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
 
-// Simulate typing effect for bot responses
+/**
+ * Simulates a typing effect for bot responses by animating text addition.
+ * Once complete, it parses Markdown, sanitizes HTML, and highlights code.
+ * @param {string} text - The full text to display.
+ * @param {HTMLElement} textElement - The element where text is displayed.
+ * @param {HTMLElement} botMsgDiv - The parent bot message element.
+ */
 const typingEffect = (text, textElement, botMsgDiv) => {
   textElement.textContent = "";
   const words = text.split(" ");
@@ -56,7 +74,7 @@ const typingEffect = (text, textElement, botMsgDiv) => {
       scrollToBottom();
     } else {
       clearInterval(typingInterval);
-      // Parse Markdown and sanitize HTML
+      // Parse Markdown and sanitize HTML once typing is complete.
       const rawMarkdown = textElement.textContent;
       const parsedHtml = marked.parse(rawMarkdown);
       const cleanHtml = DOMPurify.sanitize(parsedHtml);
@@ -68,19 +86,23 @@ const typingEffect = (text, textElement, botMsgDiv) => {
   }, 40);
 };
 
-// Make the API call and generate the bot's response (streaming from local)
+/**
+ * Generates a bot response by sending the chat history to the API.
+ * Streams the response and displays it with a typing effect.
+ * @param {HTMLElement} botMsgDiv - The bot message container element.
+ */
 const generateResponse = async (botMsgDiv) => {
   const textElement = botMsgDiv.querySelector(".message-text");
   controller = new AbortController();
 
-  // Keep track of chat history in your UI, if desired
+  // Add user's message to the chat history.
   chatHistory.push({
     role: "user",
     content: userData.message,
   });
 
   try {
-    // Fetch the streaming response from the FastAPI backend
+    // Fetch the streaming response from the backend.
     let response = await authorizedFetch(CHAT_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -93,10 +115,9 @@ const generateResponse = async (botMsgDiv) => {
       throw new Error(errorText);
     }
 
-    // Read the streamed response in chunks
+    // Read the streamed response in chunks.
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8");
-
     let responseText = "";
     while (true) {
       const { value, done } = await reader.read();
@@ -104,15 +125,14 @@ const generateResponse = async (botMsgDiv) => {
       responseText += decoder.decode(value);
     }
 
-    // Animate the fully assembled response
+    // Animate the fully assembled response.
     typingEffect(responseText, textElement, botMsgDiv);
 
-    // Add the bot response to chat history
+    // Add the bot response to chat history.
     chatHistory.push({
       role: "assistant",
       content: responseText,
     });
-
   } catch (error) {
     if (error.name === "AbortError") {
       textElement.textContent = "Response generation stopped.";
@@ -124,14 +144,16 @@ const generateResponse = async (botMsgDiv) => {
     document.body.classList.remove("bot-responding");
     scrollToBottom();
   } finally {
-    // Clear any file data after sending
+    // Clear file data after sending.
     userData.file = {};
   }
 };
 
-
-// RAG Response Generator (when a PDF file is attached)
-// This function calls the /query endpoint which retrieves context from the PDF.
+/**
+ * Generates a bot response using a custom PDF RAG endpoint.
+ * Uses the uploaded PDF's context to generate an answer.
+ * @param {HTMLElement} botMsgDiv - The bot message container element.
+ */
 const generateCustomPdfRAGResponse = async (botMsgDiv) => {
   const textElement = botMsgDiv.querySelector(".message-text");
   controller = new AbortController();
@@ -142,11 +164,7 @@ const generateCustomPdfRAGResponse = async (botMsgDiv) => {
   });
 
   try {
-    // We assume the user message is the query for the PDF context.
-    // Send the query as form data.
-    const formData = new FormData();
-    formData.append("query", userData.message);
-
+    // Prepare payload for the custom PDF query.
     let response = await authorizedFetch(CUSTOM_PDF_QUERY_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -161,15 +179,13 @@ const generateCustomPdfRAGResponse = async (botMsgDiv) => {
       throw new Error(`Server error: ${response.status}`);
     }
 
-    // The /query endpoint returns JSON with "answer" and (optionally) "context_used"
+    // Process the JSON response containing the answer.
     const data = await response.json();
     const answer = data.answer;
-
     chatHistory.push({
       role: "assistant",
       content: answer,
     });
-
     typingEffect(answer, textElement, botMsgDiv);
   } catch (error) {
     if (error.name === "AbortError") {
@@ -182,11 +198,15 @@ const generateCustomPdfRAGResponse = async (botMsgDiv) => {
     document.body.classList.remove("bot-responding");
     scrollToBottom();
   } finally {
-    // Clear file data after sending so subsequent queries use chat unless a new PDF is uploaded.
+    // Clear PDF file data after processing.
     userData.file = {};
   }
 };
 
+/**
+ * Generates a bot response using the report RAG endpoint.
+ * @param {HTMLElement} botMsgDiv - The bot message container element.
+ */
 const generateReportRAGResponse = async (botMsgDiv) => {
   const textElement = botMsgDiv.querySelector(".message-text");
   controller = new AbortController();
@@ -197,9 +217,6 @@ const generateReportRAGResponse = async (botMsgDiv) => {
   });
 
   try {
-    const formData = new FormData();
-    formData.append("query", userData.message);
-
     let response = await authorizedFetch(REPORT_QUERY_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -213,12 +230,10 @@ const generateReportRAGResponse = async (botMsgDiv) => {
 
     const data = await response.json();
     const answer = data.answer;
-
     chatHistory.push({
       role: "assistant",
       content: answer,
     });
-
     typingEffect(answer, textElement, botMsgDiv);
   } catch (error) {
     if (error.name === "AbortError") {
@@ -235,14 +250,15 @@ const generateReportRAGResponse = async (botMsgDiv) => {
   }
 };
 
-
-
-// Handle the form submission
+/**
+ * Handles the chat prompt form submission.
+ * Validates input, updates the UI, and triggers the appropriate bot response.
+ * @param {Event} e - The form submission event.
+ */
 const handleFormSubmit = (e) => {
   e.preventDefault();
   const userMessage = promptInput.value.trim();
   if (!userMessage || document.body.classList.contains("bot-responding")) return;
-
 
   if (!chatStarted) {
     chatStarted = true;
@@ -257,7 +273,7 @@ const handleFormSubmit = (e) => {
   document.body.classList.add("chats-active", "bot-responding");
   fileUploadWrapper.classList.remove("file-attached", "img-attached", "active");
 
-  // Generate user message HTML with optional file attachment
+  // Generate user message HTML with optional file attachment.
   const userMsgHTML = `
     <p class="message-text"></p>
     ${userData.file.data
@@ -274,7 +290,7 @@ const handleFormSubmit = (e) => {
   scrollToBottom();
 
   setTimeout(() => {
-    // Generate bot message HTML and add in the chat container
+    // Add a temporary bot message while waiting for the response.
     const botMsgHTML = `
       <img class="avatar" src="/static/chat-icon.svg" />
       <div class="message-text">Just a sec...</div>
@@ -293,15 +309,13 @@ const handleFormSubmit = (e) => {
   }, 600);
 };
 
-// Handle file input change (file upload)
+// File input change handler for PDF uploads.
 fileInput.addEventListener("change", () => {
-
   if (chatStarted) return;
-
   const file = fileInput.files[0];
   if (!file) return;
 
-  // Simple check for PDF
+  // Only allow PDF files.
   if (file.type !== "application/pdf") {
     alert("Only PDF files are allowed. Please select a PDF.");
     fileInput.value = "";
@@ -314,9 +328,8 @@ fileInput.addEventListener("change", () => {
   reader.onload = async (e) => {
     fileInput.value = "";
     const base64String = e.target.result.split(",")[1];
-    // Show a PDF icon or something as a preview, if you like:
     fileUploadWrapper.classList.add("active", "file-attached");
-    // Store file data in userData
+    // Store file data.
     userData.file = {
       fileName: file.name,
       data: base64String,
@@ -327,24 +340,19 @@ fileInput.addEventListener("change", () => {
     useReportBtn.classList.remove("active");
     useReportBtn.disabled = true;
 
-    // OPTIONAL: Immediately call the embedding endpoint
-    //           to demonstrate usage.
+    // OPTIONAL: Immediately embed the PDF.
     try {
       const formData = new FormData();
       formData.append("file", file);
-
-      // Call the /embed-pdf endpoint
       const res = await authorizedFetch(EMBED_API_URL, {
         method: "POST",
         body: formData,
       });
-
       if (!res.ok) {
         const err = await res.json();
         console.error("Embedding error:", err);
         return;
       }
-
       const data = await res.json();
       console.log("PDF embeddings:", data);
     } catch (err) {
@@ -353,8 +361,7 @@ fileInput.addEventListener("change", () => {
   };
 });
 
-
-// Cancel file upload
+// Cancel file upload.
 document.querySelector("#cancel-file-btn").addEventListener("click", () => {
   if (chatStarted) return;
   userData.file = {};
@@ -362,7 +369,7 @@ document.querySelector("#cancel-file-btn").addEventListener("click", () => {
   useReportBtn.disabled = false;
 });
 
-// Stop Bot Response
+// Stop the bot response.
 document.querySelector("#stop-response-btn").addEventListener("click", () => {
   controller?.abort();
   userData.file = {};
@@ -372,7 +379,7 @@ document.querySelector("#stop-response-btn").addEventListener("click", () => {
   document.body.classList.remove("bot-responding");
 });
 
-// Delete all chats
+// Delete all chats and reset the UI.
 document.querySelector("#delete-chats-btn").addEventListener("click", () => {
   chatHistory.length = 0;
   chatsContainer.innerHTML = "";
@@ -384,7 +391,9 @@ document.querySelector("#delete-chats-btn").addEventListener("click", () => {
   if (addFileBtn) addFileBtn.disabled = false;
 });
 
-// Handle suggestions click
+/**
+ * Handles suggestion item clicks by setting the prompt input and triggering form submission.
+ */
 document.querySelectorAll(".suggestions-item").forEach((suggestion) => {
   suggestion.addEventListener("click", () => {
     promptInput.value = suggestion.querySelector(".text").textContent;
@@ -392,7 +401,9 @@ document.querySelectorAll(".suggestions-item").forEach((suggestion) => {
   });
 });
 
-// Show/hide controls for mobile on prompt input focus
+/**
+ * Toggles mobile prompt controls based on user clicks.
+ */
 document.addEventListener("click", ({ target }) => {
   const wrapper = document.querySelector(".prompt-wrapper");
   const shouldHide =
@@ -402,7 +413,7 @@ document.addEventListener("click", ({ target }) => {
   wrapper.classList.toggle("hide-controls", shouldHide);
 });
 
-// Add event listeners for form submission and file input click
+// Attach event listeners for form submission and file input activation.
 promptForm.addEventListener("submit", handleFormSubmit);
 promptForm.querySelector("#add-file-btn").addEventListener("click", () => {
   if (!chatStarted) fileInput.click();
@@ -410,21 +421,14 @@ promptForm.querySelector("#add-file-btn").addEventListener("click", () => {
 
 if (useReportBtn) {
   useReportBtn.addEventListener("click", () => {
-
     if (chatStarted) return;
     useReportBtn.classList.toggle("active");
-
-    // If user toggles "Use Report" ON, also clear any PDF data
-    // because we only allow one option at a time
+    // If "Use Report" is enabled, clear any PDF file data.
     if (useReportBtn.classList.contains("active")) {
-      console.log("use-report-btn is ON.");
       userData.file = {};
       fileUploadWrapper.classList.remove("file-attached", "img-attached", "active");
       fileInput.value = "";
-      // Also re-enable the button in case it was disabled
       useReportBtn.disabled = false;
-    } else {
-      console.log("use-report-btn is OFF.");
     }
   });
 }
