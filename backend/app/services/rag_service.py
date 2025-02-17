@@ -22,7 +22,7 @@ async def process_pdf_upload(file, custom_pdf_model):
         buffer.write(await file.read())
 
     custom_pdf_model.index(
-        input_path=uploaded_path,
+        input_path=file_path,
         index_name='uploaded',
         store_collection_with_index=True,
         overwrite=True,

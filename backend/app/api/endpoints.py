@@ -139,6 +139,10 @@ async def upload_pdf(
     """
     Processes an uploaded PDF file and computes embeddings using the custom PDF model.
     """
+    global custom_pdf_model
+    custom_pdf_model = RAGMultiModalModel.from_pretrained(
+        'vidore/colqwen2-v1.0', index_root=index_root
+    )
     result = await rag_service.process_pdf_upload(file, custom_pdf_model)
     return result
 
