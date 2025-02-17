@@ -10,12 +10,15 @@ const useReportBtn = document.getElementById("use-report-btn");
 
 const CHAT_API_URL = `${window.APP_CONFIG.API_BASE}/api/chat`;
 const EMBED_API_URL = `${window.APP_CONFIG.API_BASE}/api/upload-pdf`;
-const QUERY_API_URL = `${window.APP_CONFIG.API_BASE}/api/query`;
+const CUSTOM_PDF_QUERY_API_URL = `${window.APP_CONFIG.API_BASE}/api/custom-pdf-query`;
+const REPORT_QUERY_API_URL = `${window.APP_CONFIG.API_BASE}/api/report-query`;
+
 
 let controller, typingInterval;
 const chatHistory = [];
 const userData = { message: "", file: {} };
 
+let chatStarted = false;
 
 async function authorizedFetch(url, options = {}) {
   options.credentials = 'include';
@@ -81,7 +84,7 @@ const generateResponse = async (botMsgDiv) => {
     let response = await authorizedFetch(CHAT_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: userData.message }),
+      body: JSON.stringify({ messages: chatHistory }),
       signal: controller.signal,
     });
 
@@ -129,9 +132,14 @@ const generateResponse = async (botMsgDiv) => {
 
 // RAG Response Generator (when a PDF file is attached)
 // This function calls the /query endpoint which retrieves context from the PDF.
-const generateRAGResponse = async (botMsgDiv) => {
+const generateCustomPdfRAGResponse = async (botMsgDiv) => {
   const textElement = botMsgDiv.querySelector(".message-text");
   controller = new AbortController();
+
+  chatHistory.push({
+    role: "user",
+    content: userData.message,
+  });
 
   try {
     // We assume the user message is the query for the PDF context.
@@ -139,9 +147,13 @@ const generateRAGResponse = async (botMsgDiv) => {
     const formData = new FormData();
     formData.append("query", userData.message);
 
-    let response = await authorizedFetch(QUERY_API_URL, {
+    let response = await authorizedFetch(CUSTOM_PDF_QUERY_API_URL, {
       method: "POST",
-      body: formData,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: chatHistory,
+        file_name: userData.file.fileName
+      }),
       signal: controller.signal,
     });
 
@@ -152,6 +164,12 @@ const generateRAGResponse = async (botMsgDiv) => {
     // The /query endpoint returns JSON with "answer" and (optionally) "context_used"
     const data = await response.json();
     const answer = data.answer;
+
+    chatHistory.push({
+      role: "assistant",
+      content: answer,
+    });
+
     typingEffect(answer, textElement, botMsgDiv);
   } catch (error) {
     if (error.name === "AbortError") {
@@ -169,6 +187,54 @@ const generateRAGResponse = async (botMsgDiv) => {
   }
 };
 
+const generateReportRAGResponse = async (botMsgDiv) => {
+  const textElement = botMsgDiv.querySelector(".message-text");
+  controller = new AbortController();
+
+  chatHistory.push({
+    role: "user",
+    content: userData.message,
+  });
+
+  try {
+    const formData = new FormData();
+    formData.append("query", userData.message);
+
+    let response = await authorizedFetch(REPORT_QUERY_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: chatHistory }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Server error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const answer = data.answer;
+
+    chatHistory.push({
+      role: "assistant",
+      content: answer,
+    });
+
+    typingEffect(answer, textElement, botMsgDiv);
+  } catch (error) {
+    if (error.name === "AbortError") {
+      textElement.textContent = "Response generation stopped.";
+    } else {
+      textElement.textContent = error.message;
+    }
+    textElement.style.color = "#d62939";
+    botMsgDiv.classList.remove("loading");
+    document.body.classList.remove("bot-responding");
+    scrollToBottom();
+  } finally {
+    userData.file = {};
+  }
+};
+
 
 
 // Handle the form submission
@@ -176,6 +242,15 @@ const handleFormSubmit = (e) => {
   e.preventDefault();
   const userMessage = promptInput.value.trim();
   if (!userMessage || document.body.classList.contains("bot-responding")) return;
+
+
+  if (!chatStarted) {
+    chatStarted = true;
+    useReportBtn.disabled = true;
+    fileInput.disabled = true;
+    const addFileBtn = promptForm.querySelector("#add-file-btn");
+    if (addFileBtn) addFileBtn.disabled = true;
+  }
 
   userData.message = userMessage;
   promptInput.value = "";
@@ -207,9 +282,11 @@ const handleFormSubmit = (e) => {
     const botMsgDiv = createMessageElement(botMsgHTML, "bot-message", "loading");
     chatsContainer.appendChild(botMsgDiv);
     scrollToBottom();
-    // If a PDF file has been attached, use RAG. Otherwise, use plain chat.
-    if (userData.file && userData.file.fileName) {
-      generateRAGResponse(botMsgDiv);
+
+    if (useReportBtn.classList.contains("active")) {
+      generateReportRAGResponse(botMsgDiv);
+    } else if (userData.file && userData.file.fileName) {
+      generateCustomPdfRAGResponse(botMsgDiv);
     } else {
       generateResponse(botMsgDiv);
     }
@@ -218,6 +295,9 @@ const handleFormSubmit = (e) => {
 
 // Handle file input change (file upload)
 fileInput.addEventListener("change", () => {
+
+  if (chatStarted) return;
+
   const file = fileInput.files[0];
   if (!file) return;
 
@@ -241,7 +321,7 @@ fileInput.addEventListener("change", () => {
       fileName: file.name,
       data: base64String,
       mime_type: file.type,
-      isImage: false,  // Not an image
+      isImage: false,
     };
 
     useReportBtn.classList.remove("active");
@@ -266,9 +346,7 @@ fileInput.addEventListener("change", () => {
       }
 
       const data = await res.json();
-      console.log("PDF embeddings:", data.embeddings);
-      // You can store or process the embeddings as needed.
-
+      console.log("PDF embeddings:", data);
     } catch (err) {
       console.error("Error embedding PDF:", err);
     }
@@ -278,6 +356,7 @@ fileInput.addEventListener("change", () => {
 
 // Cancel file upload
 document.querySelector("#cancel-file-btn").addEventListener("click", () => {
+  if (chatStarted) return;
   userData.file = {};
   fileUploadWrapper.classList.remove("file-attached", "img-attached", "active");
   useReportBtn.disabled = false;
@@ -298,6 +377,11 @@ document.querySelector("#delete-chats-btn").addEventListener("click", () => {
   chatHistory.length = 0;
   chatsContainer.innerHTML = "";
   document.body.classList.remove("chats-active", "bot-responding");
+  chatStarted = false;
+  fileInput.disabled = false;
+  useReportBtn.disabled = false;
+  const addFileBtn = promptForm.querySelector("#add-file-btn");
+  if (addFileBtn) addFileBtn.disabled = false;
 });
 
 // Handle suggestions click
@@ -320,19 +404,26 @@ document.addEventListener("click", ({ target }) => {
 
 // Add event listeners for form submission and file input click
 promptForm.addEventListener("submit", handleFormSubmit);
-promptForm.querySelector("#add-file-btn").addEventListener("click", () => fileInput.click());
+promptForm.querySelector("#add-file-btn").addEventListener("click", () => {
+  if (!chatStarted) fileInput.click();
+});
 
 if (useReportBtn) {
   useReportBtn.addEventListener("click", () => {
-    // Toggle an "active" state on the button
+
+    if (chatStarted) return;
     useReportBtn.classList.toggle("active");
 
-    // Check if the button is now "on" (active)
+    // If user toggles "Use Report" ON, also clear any PDF data
+    // because we only allow one option at a time
     if (useReportBtn.classList.contains("active")) {
-      // Placeholder: Execute functionality for when the button is turned on
       console.log("use-report-btn is ON.");
+      userData.file = {};
+      fileUploadWrapper.classList.remove("file-attached", "img-attached", "active");
+      fileInput.value = "";
+      // Also re-enable the button in case it was disabled
+      useReportBtn.disabled = false;
     } else {
-      // Placeholder: Execute functionality for when the button is turned off
       console.log("use-report-btn is OFF.");
     }
   });
