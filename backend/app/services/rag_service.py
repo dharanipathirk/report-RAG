@@ -1,140 +1,118 @@
-import io
-import numpy as np
-import faiss
+from pathlib import Path
+
 import openai
-import pypdf
-from fastapi import HTTPException
-
-# For the text-embedding model, the embedding dimension is 1536.
-embedding_dim = 1536
-
-# Global variables for the FAISS vector store and PDF metadata.
-vector_index = faiss.IndexFlatL2(embedding_dim)
-chunk_metadata = []  # List of dicts: {"doc_id": int, "page": int, "text": str}
-pdf_counter = 0
-pdf_docs = {}  # Maps doc_id to {"filename": str, "num_pages": int}
+from fastapi import HTTPException, Request
 
 
-async def process_pdf_upload(file):
-    """
-    Reads a PDF file, extracts text per page, computes embeddings,
-    and updates the FAISS vector store and metadata.
-    """
-    global vector_index, chunk_metadata, pdf_counter, pdf_docs
+async def process_pdf_upload(file, custom_pdf_model):
+    if file.content_type != 'application/pdf':
+        raise HTTPException(status_code=400, detail='Only PDF files are allowed.')
 
-    # Reset globals for this upload
-    vector_index = faiss.IndexFlatL2(embedding_dim)
-    chunk_metadata = []
-    pdf_counter = 0
-    pdf_docs = {}
-
-    if file.content_type != "application/pdf":
-        raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
-
-    pdf_bytes = await file.read()
-    pdf_reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
-
-    if len(pdf_reader.pages) == 0:
-        raise HTTPException(status_code=400, detail="Empty PDF file.")
-
-    pages_text = []
-    valid_page_numbers = []  # Track pages with non-empty text
-    for i, page in enumerate(pdf_reader.pages):
-        text = page.extract_text() or ""
-        if text.strip():
-            pages_text.append(text.strip())
-            valid_page_numbers.append(i)
-
-    if not pages_text:
-        raise HTTPException(status_code=400, detail="No extractable text found in PDF.")
-
-    # Compute embeddings for the extracted page texts.
-    embedding_response = openai.embeddings.create(
-        input=pages_text, model="text-embedding-3-small"
+    uploaded_path = (
+        Path(__file__).resolve().parent.parent.parent.parent / 'data' / 'uploaded'
     )
 
-    doc_id = pdf_counter
-    pdf_counter += 1
-    pdf_docs[doc_id] = {"filename": file.filename, "num_pages": len(pdf_reader.pages)}
+    uploaded_path.mkdir(parents=True, exist_ok=True)
+    file_path = uploaded_path / file.filename
 
-    # Add each embedding and its metadata to the vector store.
-    for page_num, embed_data, chunk_text in zip(
-        valid_page_numbers, embedding_response.data, pages_text
-    ):
-        embedding_vector = np.array(embed_data.embedding, dtype=np.float32)
-        embedding_vector = np.expand_dims(embedding_vector, axis=0)
-        vector_index.add(embedding_vector)
-        chunk_metadata.append(
-            {
-                "doc_id": doc_id,
-                "page": page_num + 1,  # 1-indexed page number
-                "text": chunk_text,
-            }
-        )
+    with open(file_path, 'wb') as buffer:
+        buffer.write(await file.read())
+
+    custom_pdf_model.index(
+        input_path=uploaded_path,
+        index_name='uploaded',
+        store_collection_with_index=True,
+        overwrite=True,
+    )
 
     return {
-        "message": f"PDF uploaded and processed. Document ID: {doc_id}",
-        "chunks_added": len(pages_text),
+        'message': 'PDF uploaded and processed',
     }
 
 
-async def query_rag(query: str):
-    """
-    Computes the query embedding, retrieves the most similar text chunks,
-    and generates an answer using GPT.
-    """
-    global vector_index, chunk_metadata, pdf_docs
-
-    if vector_index.ntotal == 0:
-        raise HTTPException(
-            status_code=400, detail="No documents available for querying."
-        )
-
-    query_embedding_response = openai.embeddings.create(
-        input=[query], model="text-embedding-3-small"
+def process_reports(report_model):
+    report_path = Path(__file__).resolve().parent.parent.parent.parent / 'data' / 'raw'
+    report_model.index(
+        input_path=report_path,
+        index_name='reports',
+        store_collection_with_index=True,
+        overwrite=True,
     )
-    query_embedding = query_embedding_response.data[0].embedding
-    query_embedding_np = np.array(query_embedding, dtype=np.float32)
-    query_embedding_np = np.expand_dims(query_embedding_np, axis=0)
 
-    # Retrieve the top k nearest chunks.
-    k = 5
-    distances, indices = vector_index.search(query_embedding_np, k)
 
-    retrieved_chunks = []
-    for idx in indices[0]:
-        if idx == -1 or idx >= len(chunk_metadata):
-            continue
-        retrieved_chunks.append(chunk_metadata[idx])
+async def query_rag(request: Request, colpali_model):
+    data = await request.json()
+    messages = data.get('messages', [])
 
-    if not retrieved_chunks:
-        raise HTTPException(status_code=400, detail="No relevant context found.")
-
-    # Combine retrieved chunks into a single context string.
-    context_parts = []
-    for chunk in retrieved_chunks:
-        context_parts.append(
-            f"Document {chunk['doc_id']} (Page {chunk['page']}):\n{chunk['text']}"
+    # If there is conversation history, summarize all messages except the last one.
+    if len(messages) > 1:
+        # Concatenate the content of all previous messages.
+        history_text = '\n'.join(msg.get('content', '') for msg in messages[:-1])
+        summarization_prompt = (
+            'Please summarize the following conversation context briefly. This will sent to the RAG model for context.\n'
+            'Note: This summarization is solely to maintain context in the query without affecting the RAG process. '
+            'Provide only the essential context information.\n\n'
+            f'Conversation Context:\n{history_text}'
         )
-    context_text = "\n\n".join(context_parts)
 
-    messages = [
+        summary_response = openai.chat.completions.create(
+            model='gpt-4o-mini',
+            messages=[
+                {'role': 'system', 'content': 'You are a summarization assistant.'},
+                {'role': 'user', 'content': summarization_prompt},
+            ],
+            temperature=0.3,
+        )
+        summary = summary_response.choices[0].message.content.strip()
+    else:
+        summary = ''
+
+    # Get the current (last) message.
+    current_query = messages[-1].get('content', '')
+
+    # Combine the summary with the current query.
+    if summary:
+        query = summary + '\n' + current_query
+    else:
+        query = current_query
+
+    print(query)
+
+    results = colpali_model.search(query, k=3)
+
+    result_images = [result['base64'] for result in results]
+
+    system_prompt = "You are an assistant that answers questions based on the provided image context. Answer the user's question as accurately as possible using the context below."
+
+    messages_payload = [
         {
-            "role": "system",
-            "content": (
-                "You are an assistant that answers questions based on the provided context. "
-                "Answer the user's question as accurately as possible using the context below."
-                "\n\nContext:\n" + context_text
-            ),
+            'role': 'system',
+            'content': system_prompt,
         },
-        {"role": "user", "content": query},
+        {
+            'role': 'user',
+            'content': [
+                {'type': 'text', 'text': query},
+                *map(
+                    lambda x: {
+                        'type': 'image_url',
+                        'image_url': {'url': f'data:image/png;base64,{x}'},
+                    },
+                    result_images,
+                ),
+            ],
+        },
     ]
 
     completion = openai.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages,
-        temperature=0.7,
+        model='gpt-4o-mini',
+        messages=messages_payload,
+        temperature=0.3,
     )
     answer = completion.choices[0].message.content
 
-    return {"answer": answer, "context_used": context_text}
+    return {
+        'answer': answer,
+        'document used': results[0]['doc_id'],
+        'page_used': results[0]['page_num'],
+    }
