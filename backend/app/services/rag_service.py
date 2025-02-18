@@ -1,6 +1,14 @@
+import asyncio
+import datetime
 from pathlib import Path
 
+import aiofiles  # type: ignore
 import openai
+from app.utils.helper_functions import (
+    extract_keywords,
+    highlight_keywords_in_image,
+    remove_keywords,
+)
 from fastapi import HTTPException, Request
 
 
@@ -46,6 +54,24 @@ def process_reports(report_model):
     )
 
 
+async def log_query(query: str):
+    """
+    Asynchronously appends the query along with a timestamp to a log file.
+    The log file is stored in project/data/log/queries.log.
+    """
+    # Define the log directory and ensure it exists
+    log_dir = Path(__file__).resolve().parent.parent.parent.parent / 'data' / 'log'
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / 'queries.log'
+
+    # Create a timezone-aware timestamp for the log entry
+    timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    # Write the log entry asynchronously
+    async with aiofiles.open(log_file, 'a') as f:
+        await f.write(f'{timestamp}: {query}\n')
+
+
 async def query_rag(request: Request, colpali_model):
     """
     Performs a Retrieval-Augmented Generation (RAG) query using the conversation history and the specified model.
@@ -54,38 +80,76 @@ async def query_rag(request: Request, colpali_model):
     """
     data = await request.json()
     messages = data.get('messages', [])
+    current_query = messages[-1].get('content', '')
 
-    # Summarize previous conversation context if applicable.
+    # Extract only the relevant context from the conversation history based on the current query.
     if len(messages) > 1:
-        history_text = '\n'.join(msg.get('content', '') for msg in messages[:-1])
-        summarization_prompt = (
-            'Please summarize the following conversation context briefly. This will be sent to the RAG model for context.\n'
-            'Note: This summarization is solely to maintain context in the query without affecting the RAG process. '
-            'Provide only the essential context information.\n\n'
-            f'Conversation Context:\n{history_text}'
+        conversation_history = '\n'.join(
+            msg.get('content', '') for msg in messages[:-1]
         )
 
-        summary_response = openai.chat.completions.create(
+        context_extraction_prompt = (
+            'Please read the conversation context below along with the current user query. '
+            'From the conversation, identify and extract only the details that are directly relevant '
+            'or necessary for answering the current query. Do not summarize the entire chat history; '
+            'instead, focus on providing only the essential context needed to address the user’s '
+            'question accurately. If certain parts of the conversation are unrelated, do not include '
+            'them in your response.\n\n'
+            f'Conversation Context:\n{conversation_history}'
+            f'\n\nCurrent Query:\n{current_query}'
+        )
+
+        context_extraction_response = openai.chat.completions.create(
             model='gpt-4o-mini',
             messages=[
-                {'role': 'system', 'content': 'You are a summarization assistant.'},
-                {'role': 'user', 'content': summarization_prompt},
+                {'role': 'system', 'content': 'You are a context extractor.'},
+                {'role': 'user', 'content': context_extraction_prompt},
             ],
-            temperature=0.3,
+            temperature=0.01,
         )
-        summary = summary_response.choices[0].message.content.strip()
+        relevant_context = context_extraction_response.choices[
+            0
+        ].message.content.strip()
     else:
-        summary = ''
+        relevant_context = ''
 
-    # Prepare the final query by combining the summary with the current message.
-    current_query = messages[-1].get('content', '')
-    query = summary + '\n' + current_query if summary else current_query
-    print(query)
+    # Combine the extracted relevant context with the current query.
+    query = (
+        'Conversation Context: ' + relevant_context + '\n' + current_query
+        if relevant_context
+        else current_query
+    )
 
-    results = colpali_model.search(query, k=3)
+    results = colpali_model.search(query, k=10)
     result_images = [result['base64'] for result in results]
 
-    system_prompt = "You are an assistant that answers questions based on the provided image context. Answer the user's question as accurately as possible using the context below."
+    system_prompt = """You are an assistant that strictly answers questions based on information visibly present in the provided images of company business reports. Follow these rules:
+
+                    1. If the answer cannot be conclusively found in the images, respond with:
+                    "I couldn't find the relevant information in the provided report."
+
+                    2. Never speculate, assume, or use knowledge outside of what is visible in the images.
+
+                    3. For information found in the images:
+                    - Provide a precise response using exact numbers/terms from the documents.
+                    - At the end of your answer, highlight the key facts as keywords. Use this format:
+                        **Keywords:** 'keyword1', 'keyword2', 'keyword3', ...
+                    - Each keyword should be a single word (if a phrase exists in the document, split it into separate words).
+                    - Keywords must reflect the core information in your response. If someone looks at the document and sees the keyword, it should match what you have stated.
+                    - Preserve original numerical values and financial terminology.
+
+                    Examples:
+
+                    Q: What was the Q3 marketing budget?
+                    A: The Q3 marketing budget was $2.45 million, representing 15% of operational expenses.
+                    **Keywords:** 'Q3', '$2.45', 'million', '15%'
+
+                    Q: What is the total salary for the CEO?
+                    A: The total salary for the CEO is $1,321,368.
+                    **Keywords:** '$1,321,368'
+
+                    Q: What's our market share in Asia?
+                    A: I couldn't find the relevant information in the provided report."""
 
     messages_payload = [
         {
@@ -108,14 +172,29 @@ async def query_rag(request: Request, colpali_model):
     ]
 
     completion = openai.chat.completions.create(
-        model='gpt-4o-mini',
+        model='gpt-4o',
         messages=messages_payload,
-        temperature=0.3,
+        temperature=0.2,
     )
     answer = completion.choices[0].message.content
 
+    asyncio.create_task(log_query(query))
+    asyncio.create_task(log_query(answer))
+
+    keywords = extract_keywords(answer)
+    answer = remove_keywords(answer)
+
+    if keywords:
+        num_images_to_highlight = 2
+        highlighted_images = [
+            highlight_keywords_in_image(result_images[i], keywords)
+            for i in range(min(num_images_to_highlight, len(result_images)))
+        ]
+    else:
+        highlighted_images = [result_images[0]]
+        print('No keywords found in the answer.')
+
     return {
         'answer': answer,
-        'document used': results[0]['doc_id'],
-        'page_used': results[0]['page_num'],
+        'highlighted_images': highlighted_images,
     }

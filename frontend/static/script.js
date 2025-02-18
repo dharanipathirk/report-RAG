@@ -57,13 +57,13 @@ const scrollToBottom = () =>
   container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
 
 /**
- * Simulates a typing effect for bot responses by animating text addition.
- * Once complete, it parses Markdown, sanitizes HTML, and highlights code.
- * @param {string} text - The full text to display.
- * @param {HTMLElement} textElement - The element where text is displayed.
- * @param {HTMLElement} botMsgDiv - The parent bot message element.
+ * Simulates typing effect and appends images after completion.
+ * @param {string} text - Answer text.
+ * @param {HTMLElement} textElement - Element to display text.
+ * @param {HTMLElement} botMsgDiv - Bot message container.
+ * @param {Function} [onComplete] - Callback after typing finishes.
  */
-const typingEffect = (text, textElement, botMsgDiv) => {
+const typingEffect = (text, textElement, botMsgDiv, onComplete) => {
   textElement.textContent = "";
   const words = text.split(" ");
   let wordIndex = 0;
@@ -74,7 +74,6 @@ const typingEffect = (text, textElement, botMsgDiv) => {
       scrollToBottom();
     } else {
       clearInterval(typingInterval);
-      // Parse Markdown and sanitize HTML once typing is complete.
       const rawMarkdown = textElement.textContent;
       const parsedHtml = marked.parse(rawMarkdown);
       const cleanHtml = DOMPurify.sanitize(parsedHtml);
@@ -82,8 +81,39 @@ const typingEffect = (text, textElement, botMsgDiv) => {
       hljs.highlightAll();
       botMsgDiv.classList.remove("loading");
       document.body.classList.remove("bot-responding");
+      if (onComplete) onComplete(); // Execute post-typing actions
     }
   }, 40);
+};
+
+/**
+ * Opens a modal to view images with zoom capability.
+ * @param {string} imageData - Base64 encoded image.
+ */
+const openImageViewer = (imageData) => {
+  const modal = document.createElement("div");
+  modal.className = "image-viewer-modal";
+
+  const img = document.createElement("img");
+  img.src = `data:image/png;base64,${imageData}`;
+  img.className = "zooming-image";
+
+  modal.appendChild(img);
+  document.body.appendChild(modal);
+
+  // Close modal on background click
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) document.body.removeChild(modal);
+  });
+
+  // Zoom with mouse wheel
+  let scale = 1;
+  img.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    scale += e.deltaY * -0.01;
+    scale = Math.min(Math.max(0.1, scale), 4);
+    img.style.transform = `scale(${scale})`;
+  });
 };
 
 /**
@@ -181,12 +211,28 @@ const generateCustomPdfRAGResponse = async (botMsgDiv) => {
 
     // Process the JSON response containing the answer.
     const data = await response.json();
-    const answer = data.answer;
+    const { answer, highlighted_images } = data;
     chatHistory.push({
       role: "assistant",
       content: answer,
     });
-    typingEffect(answer, textElement, botMsgDiv);
+    typingEffect(answer, textElement, botMsgDiv, () => {
+      if (highlighted_images?.length) {
+        highlighted_images.forEach((imgData) => {
+          const imgWrapper = document.createElement("div");
+          imgWrapper.className = "image-attachment";
+
+          const img = document.createElement("img");
+          img.src = `data:image/png;base64,${imgData}`;
+          img.alt = "Highlighted section";
+          img.className = "highlighted-image-thumbnail";
+
+          img.addEventListener("click", () => openImageViewer(imgData));
+          imgWrapper.appendChild(img);
+          botMsgDiv.appendChild(imgWrapper);
+        });
+      }
+    });
   } catch (error) {
     if (error.name === "AbortError") {
       textElement.textContent = "Response generation stopped.";
@@ -229,12 +275,28 @@ const generateReportRAGResponse = async (botMsgDiv) => {
     }
 
     const data = await response.json();
-    const answer = data.answer;
+    const { answer, highlighted_images } = data;
     chatHistory.push({
       role: "assistant",
       content: answer,
     });
-    typingEffect(answer, textElement, botMsgDiv);
+    typingEffect(answer, textElement, botMsgDiv, () => {
+      if (highlighted_images?.length) {
+        highlighted_images.forEach((imgData) => {
+          const imgWrapper = document.createElement("div");
+          imgWrapper.className = "image-attachment";
+
+          const img = document.createElement("img");
+          img.src = `data:image/png;base64,${imgData}`;
+          img.alt = "Highlighted section";
+          img.className = "highlighted-image-thumbnail";
+
+          img.addEventListener("click", () => openImageViewer(imgData));
+          imgWrapper.appendChild(img);
+          botMsgDiv.appendChild(imgWrapper);
+        });
+      }
+    });
   } catch (error) {
     if (error.name === "AbortError") {
       textElement.textContent = "Response generation stopped.";
