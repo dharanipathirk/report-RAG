@@ -140,13 +140,13 @@ async def query_rag(request: Request, colpali_model):
 
                     Examples:
 
-                    Q: What was the Q3 marketing budget?
-                    A: The Q3 marketing budget was $2.45 million, representing 15% of operational expenses.
-                    **Keywords:** 'Q3', '$2.45', 'million', '15%'
+                    Q: What was the Q3 marketing budget of BMW?
+                    A: The Q3 marketing budget of BMW was $2.45 million, representing 15% of operational expenses.
+                    **Keywords:** 'BMW', 'Q3', '$2.45', 'million', '15%'
 
-                    Q: What is the total salary for the CEO?
-                    A: The total salary for the CEO is $1,321,368.
-                    **Keywords:** '$1,321,368'
+                    Q: What is the total salary for the CEO of Apple?
+                    A: The total salary for the  of Apple is $1,321,368.
+                    **Keywords:** 'Apple', 'CEO', '$1,321,368'
 
                     Q: What's our market share in Asia?
                     A: I couldn't find the relevant information in the provided report."""
@@ -191,7 +191,7 @@ async def query_rag(request: Request, colpali_model):
             for i in range(min(num_images_to_highlight, len(result_images)))
         ]
     else:
-        highlighted_images = [result_images[0]]
+        highlighted_images = []
         print('No keywords found in the answer.')
 
     return {
