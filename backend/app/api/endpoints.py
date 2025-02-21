@@ -4,7 +4,8 @@ from pathlib import Path
 
 import openai
 from app.services import rag_service
-from app.services.rag_service import process_reports
+
+# from app.services.rag_service import process_reports
 from app.utils import auth
 from byaldi import RAGMultiModalModel
 from fastapi import (
@@ -35,11 +36,15 @@ custom_pdf_model = RAGMultiModalModel.from_pretrained(
     'vidore/colqwen2-v1.0', index_root=index_root
 )
 
-report_model = RAGMultiModalModel.from_pretrained(
-    'vidore/colqwen2-v1.0', index_root=index_root
-)
+# Using this as a temporary fix to avoid re-indexing the reports when the server restarts.
+# This assumes that the reports are already indexed and stored in the data/embeddings directory.
+report_model = RAGMultiModalModel.from_index('reports', index_root=index_root)
 
-process_reports(report_model)
+# report_model = RAGMultiModalModel.from_pretrained(
+#     'vidore/colqwen2-v1.0', index_root=index_root
+# )
+
+# process_reports(report_model)
 
 
 @frontend_router.get('/config.js')
