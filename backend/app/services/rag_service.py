@@ -10,6 +10,7 @@ from app.utils.helper_functions import (
     remove_keywords,
 )
 from fastapi import HTTPException, Request
+from openai import APIError, APITimeoutError
 
 
 async def process_pdf_upload(file, custom_pdf_model):
@@ -81,7 +82,6 @@ async def query_rag(request: Request, colpali_model):
     data = await request.json()
     messages = data.get('messages', [])
     current_query = messages[-1].get('content', '')
-    asyncio.create_task(log_query('original query: ' + current_query))
 
     # Extract only the relevant context from the conversation history based on the current query.
     if len(messages) > 1:
@@ -89,36 +89,66 @@ async def query_rag(request: Request, colpali_model):
             msg.get('content', '') for msg in messages[:-1]
         )
 
-        context_injection_prompt = f"""
-        Please rewrite the following query by incorporating only the essential context from the conversation history.
-        The rewritten query should remain as close as possible to the original wording, with only the necessary context injected to ensure accurate understanding.
+        context_extraction_prompt = f"""
+            Please read the conversation context below along with the current user query.
+            From the conversation, identify and extract only the details that are directly relevant or necessary for answering the current query.
+            Do not summarize the entire chat history; instead, focus on providing only the essential context needed to address the user’s question accurately.
+            If certain parts of the conversation are unrelated, do not include them in your response.
+            The extracted context should be a very concise summary of the relevant information.
+            if the conversation history is not relevant to the current query, don't output anything. Don't say things like "No relevant context is available." or similar.
 
-        Conversation history:
-        {conversation_history}
+            Conversation Context:
+            {conversation_history}
 
-        Current Query:
-        {current_query}
+            Current Query:
+            {current_query}
+            """
 
-        Rewritten Query:
-        """
-
-        context_injection_response = openai.chat.completions.create(
-            model='gpt-4o-mini',
-            messages=[
-                {
-                    'role': 'system',
-                    'content': 'You are a query rewriter that injects relevant conversation context into the current query.',
-                },
-                {'role': 'user', 'content': context_injection_prompt},
-            ],
-            temperature=0.01,
-        )
-        rewritten_query = context_injection_response.choices[0].message.content.strip()
+        retry_delay = 0.5
+        while True:
+            try:
+                context_extraction_response = openai.chat.completions.create(
+                    model='gpt-4o-mini',
+                    messages=[
+                        {'role': 'system', 'content': 'You are a query rewriter...'},
+                        {'role': 'user', 'content': context_extraction_prompt},
+                    ],
+                    temperature=0.1,
+                )
+                relevant_context = context_extraction_response.choices[
+                    0
+                ].message.content.strip()
+                break
+            except APITimeoutError as e:
+                asyncio.create_task(
+                    log_query(
+                        f'Context injection timeout: {e}. Retrying in {retry_delay}s'
+                    )
+                )
+                await asyncio.sleep(retry_delay)
+            except APIError as e:
+                if e.status_code in {502, 503, 504, 429}:
+                    asyncio.create_task(
+                        log_query(
+                            f'Context injection error ({e.status_code}): {e}. Retrying in {retry_delay}s'
+                        )
+                    )
+                    await asyncio.sleep(retry_delay)
+                else:
+                    raise
+            except Exception as e:
+                asyncio.create_task(
+                    log_query(f'Unexpected context injection error: {e}')
+                )
+                raise
     else:
-        rewritten_query = ''
+        relevant_context = ''
 
-    asyncio.create_task(log_query('rewritten query: ' + rewritten_query))
-    query = rewritten_query if rewritten_query else current_query
+    # Combine the extracted relevant context with the current query.
+    query = (
+        relevant_context + '\n' + current_query if relevant_context else current_query
+    )
+    asyncio.create_task(log_query(query))
 
     results = colpali_model.search(query, k=5)
     result_images = [result['base64'] for result in results]
@@ -171,12 +201,31 @@ async def query_rag(request: Request, colpali_model):
         },
     ]
 
-    completion = openai.chat.completions.create(
-        model='gpt-4o',
-        messages=messages_payload,
-        temperature=0.2,
-    )
-    answer = completion.choices[0].message.content
+    while True:
+        try:
+            completion = openai.chat.completions.create(
+                model='gpt-4o', messages=messages_payload, temperature=0.2
+            )
+            answer = completion.choices[0].message.content
+            break
+        except APITimeoutError as e:
+            asyncio.create_task(
+                log_query(f'Completion timeout: {e}. Retrying in {retry_delay}s')
+            )
+            await asyncio.sleep(retry_delay)
+        except APIError as e:
+            if e.status_code in {502, 503, 504, 429}:
+                asyncio.create_task(
+                    log_query(
+                        f'Completion error ({e.status_code}): {e}. Retrying in {retry_delay}s'
+                    )
+                )
+                await asyncio.sleep(retry_delay)
+            else:
+                raise
+        except Exception as e:
+            asyncio.create_task(log_query(f'Unexpected completion error: {e}'))
+            raise
 
     asyncio.create_task(log_query(answer))
 
