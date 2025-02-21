@@ -81,6 +81,7 @@ async def query_rag(request: Request, colpali_model):
     data = await request.json()
     messages = data.get('messages', [])
     current_query = messages[-1].get('content', '')
+    asyncio.create_task(log_query('original query: ' + current_query))
 
     # Extract only the relevant context from the conversation history based on the current query.
     if len(messages) > 1:
@@ -88,39 +89,38 @@ async def query_rag(request: Request, colpali_model):
             msg.get('content', '') for msg in messages[:-1]
         )
 
-        context_extraction_prompt = (
-            'Please read the conversation context below along with the current user query. '
-            'From the conversation, identify and extract only the details that are directly relevant '
-            'or necessary for answering the current query. Do not summarize the entire chat history; '
-            'instead, focus on providing only the essential context needed to address the user’s '
-            'question accurately. If certain parts of the conversation are unrelated, do not include '
-            'them in your response.\n\n'
-            f'Conversation Context:\n{conversation_history}'
-            f'\n\nCurrent Query:\n{current_query}'
-        )
+        context_injection_prompt = f"""
+        Please rewrite the following query by incorporating only the essential context from the conversation history.
+        The rewritten query should remain as close as possible to the original wording, with only the necessary context injected to ensure accurate understanding.
 
-        context_extraction_response = openai.chat.completions.create(
+        Conversation history:
+        {conversation_history}
+
+        Current Query:
+        {current_query}
+
+        Rewritten Query:
+        """
+
+        context_injection_response = openai.chat.completions.create(
             model='gpt-4o-mini',
             messages=[
-                {'role': 'system', 'content': 'You are a context extractor.'},
-                {'role': 'user', 'content': context_extraction_prompt},
+                {
+                    'role': 'system',
+                    'content': 'You are a query rewriter that injects relevant conversation context into the current query.',
+                },
+                {'role': 'user', 'content': context_injection_prompt},
             ],
             temperature=0.01,
         )
-        relevant_context = context_extraction_response.choices[
-            0
-        ].message.content.strip()
+        rewritten_query = context_injection_response.choices[0].message.content.strip()
     else:
-        relevant_context = ''
+        rewritten_query = ''
 
-    # Combine the extracted relevant context with the current query.
-    query = (
-        'Conversation Context: ' + relevant_context + '\n' + current_query
-        if relevant_context
-        else current_query
-    )
+    asyncio.create_task(log_query('rewritten query: ' + rewritten_query))
+    query = rewritten_query if rewritten_query else current_query
 
-    results = colpali_model.search(query, k=10)
+    results = colpali_model.search(query, k=5)
     result_images = [result['base64'] for result in results]
 
     system_prompt = """You are an assistant that strictly answers questions based on information visibly present in the provided images of company business reports. Follow these rules:
@@ -178,7 +178,6 @@ async def query_rag(request: Request, colpali_model):
     )
     answer = completion.choices[0].message.content
 
-    asyncio.create_task(log_query(query))
     asyncio.create_task(log_query(answer))
 
     keywords = extract_keywords(answer)
