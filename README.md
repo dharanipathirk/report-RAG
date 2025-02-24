@@ -4,6 +4,7 @@ A RAG chatbot prototype that combines Vision Language Model (ColQWen2) based ret
 
 
 # Demo
+Click on the image to view the demo
 [![Report-RAG-demo](./assets/screenshot.png)](https://youtu.be/w5iZgXIolJ8)
 
 ## 🔍 What is Report-RAG?
